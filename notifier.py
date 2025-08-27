@@ -10,8 +10,12 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+# Load .env from project root explicitly to avoid CWD issues
+BASE_DIR = Path(__file__).resolve().parent
+# Force .env to override any existing OS env vars to avoid stale values
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=True)
 
 # Configuration
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")

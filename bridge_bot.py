@@ -16,15 +16,18 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 import sys
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, 
     CommandHandler, 
     MessageHandler, 
+    CallbackQueryHandler,
     filters, 
     ContextTypes
 )
 from telegram.request import HTTPXRequest
+import mss
+import mss.tools
 
 # Setup logging
 logging.basicConfig(
@@ -42,7 +45,9 @@ load_dotenv()
 # Paths
 BASE = Path(__file__).resolve().parent
 INBOX = Path("tasks/inbox")
+UPLOADS = Path("tasks/uploads")
 INBOX.mkdir(parents=True, exist_ok=True)
+UPLOADS.mkdir(parents=True, exist_ok=True)
 
 # AutoHotkey configuration
 AHK_EXE = r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"  # Adjust if needed
@@ -53,7 +58,9 @@ HELP_TEXT = """
 
 /task <directive> - Create a new task for Claude
 /note <text> - Add a note to the last task
-/to <target> <message> - Send to ChatGPT/Claude/Cursor
+/to <target> <message> - Send to ChatGPT/Claude/Cursor (new cursor: opens new agent)
+/query <claude> <message> - Direct send to Claude (no quick-input)
+/sendfile <target> - Send the last uploaded file's content to a target
 /status - Check runner status
 /list - List pending tasks
 /clear - Clear completed tasks
@@ -218,7 +225,7 @@ async def cmd_to(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     
     target = ctx.args[0].lower()
-    valid_targets = ["chatgpt", "claude", "cursor"]
+    valid_targets = ["chatgpt", "claude", "cursor", "claude_direct", "cursor_direct"]
     
     if target not in valid_targets:
         await update.message.reply_text(
@@ -241,6 +248,20 @@ async def cmd_to(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Sent to {target}: {text[:50]}...")
     
     # Send result
+    await update.message.reply_text(result, parse_mode='Markdown')
+
+async def cmd_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Directly send to Claude without quick-input flow"""
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text("Usage: /query claude <message>")
+        return
+    target = ctx.args[0].lower()
+    if target != "claude":
+        await update.message.reply_text("Target must be 'claude'")
+        return
+    text = " ".join(ctx.args[1:])
+    await update.message.chat.send_action(action="typing")
+    result = send_to_desktop("claude_direct", text)
     await update.message.reply_text(result, parse_mode='Markdown')
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -306,6 +327,131 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Show help message"""
     await update.message.reply_text(HELP_TEXT, parse_mode='Markdown')
 
+async def cmd_snap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Capture a desktop screenshot and send it back"""
+    try:
+        with mss.mss() as sct:
+            monitor = sct.monitors[1]
+            img = sct.grab(monitor)
+            temp_path = BASE / f"screenshot_{uuid.uuid4().hex[:8]}.png"
+            mss.tools.to_png(img.rgb, img.size, output=str(temp_path))
+        await update.message.reply_photo(photo=open(temp_path, 'rb'))
+    except Exception as e:
+        await update.message.reply_text(f"❌ Screenshot failed: {e}")
+    finally:
+        try:
+            if 'temp_path' in locals() and Path(temp_path).exists():
+                Path(temp_path).unlink()
+        except:
+            pass
+
+ALLOWED_FILE_EXTS = {".md", ".txt", ".patch", ".diff"}
+MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
+
+def _read_uploaded_as_text(path: Path) -> str:
+    """Return a safe textual representation for various file types."""
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(path))
+            text = "\n\n".join((p.extract_text() or "").strip() for p in reader.pages)
+            return text
+        except Exception:
+            return ""
+    if ext in {".png", ".jpg", ".jpeg"}:
+        return f"Image uploaded: {path.name}. Please analyze the content contextually."
+    # Default to utf-8 text with replacement for any errors
+    return path.read_text(encoding="utf-8", errors="replace")
+
+async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle small directive files (.md/.txt/.patch/.diff)"""
+    doc = update.message.document
+    if not doc:
+        return
+    name = doc.file_name or "file"
+    ext = Path(name).suffix.lower()
+    size = doc.file_size or 0
+    if ext not in ALLOWED_FILE_EXTS or size > MAX_FILE_SIZE:
+        await update.message.reply_text(
+            f"Only {', '.join(sorted(ALLOWED_FILE_EXTS))} up to 15MB are accepted.")
+        return
+
+    # Download to uploads directory
+    tg_file = await doc.get_file()
+    dest = UPLOADS / f"{int(time.time())}_{name}"
+    await tg_file.download_to_drive(custom_path=str(dest))
+    ctx.chat_data["last_upload"] = str(dest)
+
+    # Inline keyboard to choose target without needing a caption
+    buttons = [
+        [InlineKeyboardButton("ChatGPT", callback_data=f"sendfile:chatgpt:{dest.name}")],
+        [InlineKeyboardButton("Claude (Opus flow)", callback_data=f"sendfile:claude:{dest.name}")],
+        [InlineKeyboardButton("Claude (direct)", callback_data=f"sendfile:claude_direct:{dest.name}")],
+        [InlineKeyboardButton("Cursor (new agent)", callback_data=f"sendfile:cursor:{dest.name}")],
+        [InlineKeyboardButton("Cursor (direct)", callback_data=f"sendfile:cursor_direct:{dest.name}")]
+    ]
+    await update.message.reply_text(
+        f"📎 Uploaded `{name}` ({size} bytes). Choose where to send:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def cmd_sendfile(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Send the last uploaded file's content to a desktop target"""
+    if not ctx.args:
+        await update.message.reply_text("Usage: /sendfile <chatgpt|claude|cursor>")
+        return
+    target = ctx.args[0].lower()
+    if target not in ["chatgpt", "claude", "cursor", "claude_direct", "cursor_direct"]:
+        await update.message.reply_text("Invalid target.")
+        return
+
+    # Prefer per-chat last upload; fallback to newest in uploads
+    path = ctx.chat_data.get("last_upload")
+    if not path:
+        files = sorted(UPLOADS.glob("*"))
+        if files:
+            path = str(files[-1])
+    if not path or not Path(path).exists():
+        await update.message.reply_text("No uploaded file found.")
+        return
+
+    try:
+        content = _read_uploaded_as_text(Path(path))
+        if not content.strip():
+            await update.message.reply_text("File has no extractable text.")
+            return
+        result = send_to_desktop(target, content)
+        await update.message.reply_text(result)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send file: {e}")
+
+async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+    if not query.data.startswith("sendfile:"):
+        return
+    try:
+        _, target, fname = query.data.split(":", 2)
+    except ValueError:
+        return
+    path = UPLOADS / fname
+    if not path.exists():
+        await query.edit_message_text("File no longer available.")
+        return
+    try:
+        content = _read_uploaded_as_text(path)
+        if not content.strip():
+            await query.edit_message_text("File has no extractable text.")
+            return
+        result = send_to_desktop(target, content)
+        await query.edit_message_text(f"{result}")
+    except Exception as e:
+        await query.edit_message_text(f"❌ Failed to send file: {e}")
+
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Handle regular text messages"""
     text = update.message.text.strip()
@@ -356,10 +502,14 @@ def main():
     app.add_handler(CommandHandler("task", cmd_task))
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("to", cmd_to))  # New command
+    app.add_handler(CommandHandler("query", cmd_query))
+    app.add_handler(CommandHandler("snap", cmd_snap))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     

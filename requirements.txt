@@ -7,3 +7,5 @@ gitpython==3.1.42
 colorama==0.4.6
 pydantic==2.5.3
 aiofiles==23.2.1
+mss==10.1.0
+pypdf==5.1.0

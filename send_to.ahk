@@ -3,29 +3,41 @@
 SetTitleMatchMode 2
 ; Use screen coords for stable clicking
 CoordMode "Mouse", "Screen"
+; Preferred Claude model to select (unused in new flow, kept for future)
+desiredClaudeModel := "Opus"
 ; Send text to ChatGPT, Claude, or Cursor via clipboard
 ; Usage: AutoHotkey64.exe send_to.ahk <target> <msgfile>
-; targets: chatgpt | claude | cursor
+; Or:    AutoHotkey64.exe send_to.ahk <target> FILE <filepath>
+; targets: chatgpt | claude | claude_direct | cursor | cursor_direct
 
 if A_Args.Length < 2 {
-    MsgBox "Usage: send_to.ahk <target> <msgfile>"
+    MsgBox "Usage: send_to.ahk <target> <msgfile|FILE <path>>"
     ExitApp 1
 }
 
 target  := A_Args[1]
-msgfile := A_Args[2]
-
-; Read the message file
-try {
-    text := FileRead(msgfile, "UTF-8")
-} catch Error as err {
-    MsgBox "Failed to read file: " . msgfile . "`nError: " . err.Message
-    ExitApp 1
+mode    := "SEND"
+msgfile := ""
+imgpath := ""
+if (A_Args.Length >= 3 && A_Args[2] = "FILE") {
+    mode := "FILE"
+    imgpath := A_Args[3]
+} else {
+    msgfile := A_Args[2]
 }
 
-; Copy to clipboard
-A_Clipboard := text
-Sleep 80
+if (mode = "SEND") {
+    ; Read the message file
+    try {
+        text := FileRead(msgfile, "UTF-8")
+    } catch Error as err {
+        MsgBox "Failed to read file: " . msgfile . "`nError: " . err.Message
+        ExitApp 1
+    }
+    ; Copy to clipboard
+    A_Clipboard := text
+    Sleep 80
+}
 
 ; Send to appropriate target
 switch target {
@@ -42,12 +54,58 @@ case "chatgpt":
     ExitApp
     
 case "claude":
-    FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
+    ; Prefer Claude Desktop app if installed; fallback to web
+    claude1 := EnvGet("LOCALAPPDATA") . "\\Programs\\Claude\\Claude.exe"
+    claude2 := EnvGet("ProgramFiles") . "\\Claude\\Claude.exe"
+    claudeExe := ""
+    if FileExist(claude1)
+        claudeExe := claude1
+    else if FileExist(claude2)
+        claudeExe := claude2
+
+    if (claudeExe != "")
+        FocusOrLaunch("Claude", claudeExe, "")
+    else
+        FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
     EnsureActive("Claude")
-    ; Focus the composer using Ctrl+Alt+Space, then paste
+    ; 1) Bring up Claude quick input anywhere
     Send "^!{Space}"
     Sleep 220
-    PasteAndSend("Claude", false)  ; skip clicks; rely on keyboard focus
+    ; 2) Dummy input to normalize focus
+    Send "hello"
+    Sleep 120
+    Send "{Enter}"
+    Sleep 3500
+    ; 3) Directly paste user's prompt (already on clipboard)
+    Send "^v"
+    Sleep 200
+    ; 4) Move to send-with-Opus and trigger send
+    Send "{Tab 4}"
+    Sleep 160
+    Send "{Space}"
+    Sleep 140
+    Send "{Space}"
+    Sleep 200
+    ExitApp
+
+case "claude_direct":
+    ; Direct send to Claude without quick-input or model switching.
+    ; Just focus Claude and paste/enter.
+    ; Prefer Desktop app, fallback to web.
+    claude1 := EnvGet("LOCALAPPDATA") . "\\Programs\\Claude\\Claude.exe"
+    claude2 := EnvGet("ProgramFiles") . "\\Claude\\Claude.exe"
+    claudeExe := ""
+    if FileExist(claude1)
+        claudeExe := claude1
+    else if FileExist(claude2)
+        claudeExe := claude2
+
+    if (claudeExe != "")
+        FocusOrLaunch("Claude", claudeExe, "")
+    else
+        FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
+    EnsureActive("Claude")
+    PasteAndSend("Claude", false)
     ExitApp
     
 case "cursor":
@@ -66,12 +124,35 @@ case "cursor":
         cursorExe := "Cursor.exe"  ; fallback to PATH lookup
 
     FocusOrLaunch("Cursor", cursorExe, "")
-    
-    ; Focus chat input with custom keybinding
-    ; You must set this in Cursor: File → Preferences → Keyboard Shortcuts
-    ; Search for "Focus Chat" and bind to Ctrl+Alt+;
+    ; Open a new agent chat (Ctrl+Shift+I)
+    Send "^+i"
+    ; Give Cursor time to create the chat pane
+    Sleep 700
+    ; Ensure the chat input is focused, then paste and send
     Send "^!;"
-    Sleep 120
+    Sleep 160
+    Send "^v{Enter}"
+    ExitApp
+
+case "cursor_direct":
+    ; Previous behavior: focus chat and paste
+    tryPath1 := EnvGet("LOCALAPPDATA") . "\Programs\cursor\Cursor.exe"
+    tryPath2 := EnvGet("ProgramFiles") . "\Cursor\Cursor.exe"
+    tryPath3 := EnvGet("ProgramFiles(x86)") . "\Cursor\Cursor.exe"
+    cursorExe := ""
+    if FileExist(tryPath1)
+        cursorExe := tryPath1
+    else if FileExist(tryPath2)
+        cursorExe := tryPath2
+    else if FileExist(tryPath3)
+        cursorExe := tryPath3
+    else
+        cursorExe := "Cursor.exe"
+
+    FocusOrLaunch("Cursor", cursorExe, "")
+    ; Focus chat input with custom keybinding (Ctrl+Alt+;)
+    Send "^!;"
+    Sleep 140
     Send "^v{Enter}"
     ExitApp
     
@@ -156,6 +237,31 @@ PasteAndSend(title, doClick := true) {
     ; Release always-on-top and input block
     WinSetAlwaysOnTop 0, title
     BlockInput "Off"
+}
+
+SelectClaudeModel(title, modelName) {
+    ; Heuristic navigation to model dropdown and selection
+    EnsureActive(title)
+    Sleep 150
+    ; Move focus away/back to stabilize
+    Send "{Shift down}{Tab}{Shift up}{Tab}"
+    Sleep 120
+    ; From composer, try 4 Tabs to reach model selector
+    Send "{Tab 4}"
+    Sleep 160
+    ; Open dropdown
+    Send "{Space}"
+    Sleep 160
+    ; Some builds require a second space
+    Send "{Space}"
+    Sleep 220
+    ; Type filter and confirm
+    if (modelName) {
+        Send modelName
+        Sleep 240
+        Send "{Enter}"
+        Sleep 180
+    }
 }
 
 ClickComposer(title, x, y, w, h) {
