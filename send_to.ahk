@@ -5,6 +5,9 @@ SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
 ; Preferred Claude model to select (unused in new flow, kept for future)
 desiredClaudeModel := "Opus"
+; Global step delay to avoid missed keystrokes
+STEP_DELAY_MS := 500
+SetKeyDelay STEP_DELAY_MS
 ; Send text to ChatGPT, Claude, or Cursor via clipboard
 ; Usage:
 ;  - AutoHotkey64.exe send_to.ahk <target> <msgfile>
@@ -254,8 +257,10 @@ case "cursor_move":
     FocusOrLaunch("Cursor", cursorExe, "")
     EnsureActive("Cursor")
 
-    ; Open "Open Folder" in Cursor (expects Ctrl+M bound)
+    ; Open "Open Folder" in Cursor (expects Ctrl+M bound), then "Open" dialog with Ctrl+O
     Send "^m"
+    Sleep 240
+    Send "^o"
     Sleep 320
     ; Focus the address/path field and clear it
     Send "!d"
@@ -266,7 +271,7 @@ case "cursor_move":
     ; Build destination path from base + user-provided relative segment (simple join)
     base := "C:\Users\Moni\Documents\claudeprojects"
     ; Ensure base has no trailing backslash
-    while (SubStr(base, StrLen(base)) = "\\")
+    while (SubStr(base, StrLen(base)) = "\")
         base := SubStr(base, 1, StrLen(base) - 1)
 
     rel := text   ; text is loaded from msg file in SEND mode
@@ -275,16 +280,16 @@ case "cursor_move":
     ; Remove literal prefix "cursor " if present (case-insensitive)
     if (StrLen(rel) >= 7 && StrLower(SubStr(rel, 1, 6)) = "cursor" && SubStr(rel, 7, 1) = " ")
         rel := Trim(SubStr(rel, 8), " `t")
-    ; Normalize forward slashes to backslashes
-    rel := StrReplace(rel, "/", "\\")
+    ; Normalize forward slashes to single backslashes
+    rel := StrReplace(rel, "/", "\")
     ; Remove ALL leading backslashes from rel
-    while (SubStr(rel, 1, 1) = "\\")
+    while (SubStr(rel, 1, 1) = "\")
         rel := SubStr(rel, 2)
 
     if (rel = "")
         dest := base
     else
-        dest := base . "\\" . rel
+        dest := base . "\" . rel
 
     ; Paste destination path and confirm in one go
     A_Clipboard := dest
@@ -294,6 +299,63 @@ case "cursor_move":
     Send "{Enter}"
     Sleep 140
     Send "{Enter}"
+    Sleep 160
+    Send "{Enter}"
+    ExitApp
+    
+case "cursor_new":
+    ; Focus Cursor, open folder dialog, navigate to base path, then create new file
+    tryPath1 := EnvGet("LOCALAPPDATA") . "\Programs\cursor\Cursor.exe"
+    tryPath2 := EnvGet("ProgramFiles") . "\Cursor\Cursor.exe"
+    tryPath3 := EnvGet("ProgramFiles(x86)") . "\Cursor\Cursor.exe"
+    cursorExe := ""
+    if FileExist(tryPath1)
+        cursorExe := tryPath1
+    else if FileExist(tryPath2)
+        cursorExe := tryPath2
+    else if FileExist(tryPath3)
+        cursorExe := tryPath3
+    else
+        cursorExe := "Cursor.exe"
+
+    FocusOrLaunch("Cursor", cursorExe, "")
+    EnsureActive("Cursor")
+
+    ; Ctrl+M, Ctrl+O to open the folder dialog
+    Send "^m"
+    Sleep 220
+    Send "^o"
+    Sleep 320
+
+    ; Alt+D to focus address bar, then paste path and confirm
+    Send "!d"
+    Sleep 160
+    Send "^a"
+    Sleep 100
+    base := "C:\Users\Moni\Documents\Claudeprojects"
+    A_Clipboard := base
+    Sleep 100
+    Send "^v"
+    Sleep 140
+    Send "{Enter}"
+    Sleep 220
+
+    ; Create new file: Ctrl+Shift+N, type filename from text, confirm
+    Send "^+n"
+    Sleep 220
+    name := Trim(text, "`r`n `t")
+    if (name != "") {
+        Send name
+        Sleep 140
+        ; Enter, Enter, Tab, Tab, Tab, Enter
+        Send "{Enter}"
+        Sleep 120
+        Send "{Enter}"
+        Sleep 120
+        Send "{Tab}{Tab}{Tab}"
+        Sleep 140
+        Send "{Enter}"
+    }
     ExitApp
     
 case "cursor_custom":
@@ -342,6 +404,50 @@ case "custom":
     keysText := Trim(text, "`r`n `t")
     if (keysText != "")
         DoSendKeys(keysText)
+    ExitApp
+
+case "focus":
+    ; Focus a specific application based on the provided name in `text`
+    app := Trim(text, "`r`n `t")
+    if (app = "cursor") {
+        tryPath1 := EnvGet("LOCALAPPDATA") . "\Programs\cursor\Cursor.exe"
+        tryPath2 := EnvGet("ProgramFiles") . "\Cursor\Cursor.exe"
+        tryPath3 := EnvGet("ProgramFiles(x86)") . "\Cursor\Cursor.exe"
+        cursorExe := ""
+        if FileExist(tryPath1)
+            cursorExe := tryPath1
+        else if FileExist(tryPath2)
+            cursorExe := tryPath2
+        else if FileExist(tryPath3)
+            cursorExe := tryPath3
+        else
+            cursorExe := "Cursor.exe"
+        FocusOrLaunch("Cursor", cursorExe, "")
+        EnsureActive("Cursor")
+    } else if (app = "claude") {
+        claude1 := EnvGet("LOCALAPPDATA") . "\\Programs\\Claude\\Claude.exe"
+        claude2 := EnvGet("ProgramFiles") . "\\Claude\\Claude.exe"
+        claudeExe := ""
+        if FileExist(claude1)
+            claudeExe := claude1
+        else if FileExist(claude2)
+            claudeExe := claude2
+        if (claudeExe != "")
+            FocusOrLaunch("ahk_exe Claude.exe", claudeExe, "")
+        else
+            FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
+        EnsureActive("ahk_exe Claude.exe")
+    } else if (app = "chrome") {
+        chromePath := EnvGet("LOCALAPPDATA") . "\\Google\\Chrome\\Application\\chrome.exe"
+        if FileExist(chromePath)
+            FocusOrLaunch("ahk_exe chrome.exe", chromePath, "")
+        else
+            FocusOrLaunch("ahk_exe chrome.exe")
+        EnsureActive("ahk_exe chrome.exe")
+    } else {
+        MsgBox "Unknown focus target: " . app
+        ExitApp 1
+    }
     ExitApp
 
 default:
@@ -416,11 +522,11 @@ PasteAndSend(title, doClick := true) {
         Sleep 160
     }
     
-    ; Paste text and send
-    SendInput "^v"
-    Sleep 160
+    ; Paste text and send (honor global step delay)
+    Send "^v"
+    Sleep STEP_DELAY_MS
     Send "{Enter}"
-    Sleep 240
+    Sleep STEP_DELAY_MS
     
     ; Release always-on-top and input block
     WinSetAlwaysOnTop 0, title
@@ -489,7 +595,7 @@ DoSendKeys(keysText) {
             }
             Send lower
         }
-        Sleep 120
+        Sleep STEP_DELAY_MS
     }
 }
 

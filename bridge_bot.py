@@ -103,6 +103,8 @@ HELP_TEXT = """
 /move cursor <path> - Same as above; explicit target prefix
 /custom <keys> - Send global key input without focusing
 /custom <cursor|claude> <keys> - Focus target and send custom input
+/new cursor <filename> - Focus Cursor, open project, create file, confirm
+/focus <cursor|claude|chrome> - Focus a desktop app window
 /status - Check runner status
 /list - List pending tasks
 /clear - Clear completed tasks
@@ -389,6 +391,41 @@ async def cmd_custom(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     result = send_to_desktop(mapped, keys)
     await update.message.reply_text(result)
 
+async def cmd_new(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Create a new file in Cursor via automation.
+    Usage: /new cursor <filename>
+    """
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text("Usage: /new cursor <filename>")
+        return
+    target = ctx.args[0].lower()
+    if target != "cursor":
+        await update.message.reply_text("Only supported target is 'cursor'")
+        return
+    filename = " ".join(ctx.args[1:]).strip()
+    if not filename:
+        await update.message.reply_text("Provide a filename, e.g. /new cursor README.md")
+        return
+    await update.message.chat.send_action(action="typing")
+    result = send_to_desktop("cursor_new", filename)
+    await update.message.reply_text(result)
+
+async def cmd_focus(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Focus a desktop application window.
+    Usage: /focus <cursor|claude|chrome>
+    """
+    if not ctx.args or len(ctx.args) < 1:
+        await update.message.reply_text("Usage: /focus <cursor|claude|chrome>")
+        return
+    target = ctx.args[0].lower()
+    valid = ["cursor", "claude", "chrome"]
+    if target not in valid:
+        await update.message.reply_text("Target must be one of: cursor, claude, chrome")
+        return
+    await update.message.chat.send_action(action="typing")
+    result = send_to_desktop("focus", target)
+    await update.message.reply_text(result)
+
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Check system status"""
     inbox_count = len(list(INBOX.glob("*.json")))
@@ -626,6 +663,8 @@ def main():
     app.add_handler(CommandHandler("query", cmd_query))
     app.add_handler(CommandHandler("move", cmd_move))
     app.add_handler(CommandHandler("custom", cmd_custom))
+    app.add_handler(CommandHandler("new", cmd_new))
+    app.add_handler(CommandHandler("focus", cmd_focus))
     app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CommandHandler("snap", cmd_snap))
     app.add_handler(CommandHandler("status", cmd_status))
