@@ -1,0 +1,10 @@
+{
+  "id": "task-ae3693a9",
+  "created_ts": 1756325261,
+  "created_at": "2025-08-27T23:07:41.714614",
+  "kind": "task",
+  "text": "/to claude hello from telegram",
+  "attachments": [],
+  "status": "queued",
+  "user_id": 1790855428
+}

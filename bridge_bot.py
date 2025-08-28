@@ -49,6 +49,43 @@ UPLOADS = Path("tasks/uploads")
 INBOX.mkdir(parents=True, exist_ok=True)
 UPLOADS.mkdir(parents=True, exist_ok=True)
 
+# Simple token → file-path index for callback data (keeps callback_data <= 64 bytes)
+UPLOAD_INDEX = UPLOADS / "index.json"
+
+def _load_upload_index() -> dict:
+    try:
+        return json.loads(UPLOAD_INDEX.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+def _save_upload_index(data: dict):
+    try:
+        UPLOAD_INDEX.write_text(json.dumps(data), encoding="utf-8")
+    except Exception:
+        pass
+
+def _put_upload_token(path: Path) -> str:
+    data = _load_upload_index()
+    token = uuid.uuid4().hex[:12]
+    data[token] = str(path)
+    # Keep index from growing unbounded
+    if len(data) > 2000:
+        # drop oldest roughly by recreating with last 1500
+        items = list(data.items())[-1500:]
+        data = {k: v for k, v in items}
+    _save_upload_index(data)
+    return token
+
+def _get_upload_path(token: str) -> Path | None:
+    data = _load_upload_index()
+    p = data.get(token)
+    return Path(p) if p else None
+
+def _build_file_reference_message(path: Path) -> str:
+    """Create the requested directive line that points to tasks/uploads."""
+    rel_hint = f"../claudeprojects/orchestrator/tasks/uploads/{path.name}"
+    return f"proceed according to \"{rel_hint}\""
+
 # AutoHotkey configuration
 AHK_EXE = r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"  # Adjust if needed
 SEND_AHK = str(BASE / "send_to.ahk")
@@ -59,8 +96,13 @@ HELP_TEXT = """
 /task <directive> - Create a new task for Claude
 /note <text> - Add a note to the last task
 /to <target> <message> - Send to ChatGPT/Claude/Cursor (new cursor: opens new agent)
-/query <claude> <message> - Direct send to Claude (no quick-input)
+/query <claude|cursor> <message> - Direct send (no quick-input)
 /sendfile <target> - Send the last uploaded file's content to a target
+/stop <target> - Stop/interrupt in Cursor/Claude
+/move <path> - Focus Cursor and open folder to the given path
+/move cursor <path> - Same as above; explicit target prefix
+/custom <keys> - Send global key input without focusing
+/custom <cursor|claude> <keys> - Focus target and send custom input
 /status - Check runner status
 /list - List pending tasks
 /clear - Clear completed tasks
@@ -112,7 +154,26 @@ def send_to_desktop(target: str, text: str) -> str:
     if not os.path.exists(SEND_AHK):
         return "❌ send_to.ahk script not found"
     
-    # Create temp file with message
+    # Special STOP mode: invoke AHK without creating a temp file
+    if isinstance(text, str) and text.strip().upper() == "STOP":
+        try:
+            result = subprocess.run(
+                [AHK_EXE, SEND_AHK, target, "STOP"],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr[:400] if result.stderr else "Unknown error"
+                return f"❌ AHK error (code {result.returncode}):\n{error_msg}"
+            return f"✅ Sent to {target.capitalize()}"
+        except subprocess.TimeoutExpired:
+            return "❌ Timeout - AutoHotkey took too long"
+        except Exception as e:
+            logger.error(f"Error sending to {target}: {e}")
+            return f"❌ Error: {str(e)[:200]}"
+
+    # Create temp file with message for normal SEND/FILE flows
     tmp = BASE / "tasks" / "inbox" / f"msg_{uuid.uuid4().hex[:8]}.txt"
     
     try:
@@ -250,19 +311,83 @@ async def cmd_to(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Send result
     await update.message.reply_text(result, parse_mode='Markdown')
 
-async def cmd_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Directly send to Claude without quick-input flow"""
-    if not ctx.args or len(ctx.args) < 2:
-        await update.message.reply_text("Usage: /query claude <message>")
+async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Send STOP to a desktop application (cursor/claude)"""
+    if not ctx.args or len(ctx.args) < 1:
+        await update.message.reply_text("Usage: /stop <cursor|claude>")
         return
     target = ctx.args[0].lower()
-    if target != "claude":
-        await update.message.reply_text("Target must be 'claude'")
+    if target not in ["cursor", "cursor_direct", "claude", "claude_direct"]:
+        await update.message.reply_text("Target must be cursor or claude")
+        return
+    # Use the STOP mode in AHK by passing special token
+    result = send_to_desktop(target, "STOP")
+    await update.message.reply_text(result)
+
+async def cmd_query(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Directly send to Claude/Cursor without quick-input flow"""
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text("Usage: /query <claude|cursor> <message>")
+        return
+    target = ctx.args[0].lower()
+    if target not in ["claude", "cursor"]:
+        await update.message.reply_text("Target must be 'claude' or 'cursor'")
         return
     text = " ".join(ctx.args[1:])
     await update.message.chat.send_action(action="typing")
-    result = send_to_desktop("claude_direct", text)
+    mapped = "claude_direct" if target == "claude" else "cursor_direct"
+    result = send_to_desktop(mapped, text)
     await update.message.reply_text(result, parse_mode='Markdown')
+
+async def cmd_move(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Open a folder in Cursor by sending Ctrl+M and path input.
+    Usage:
+      /move <relative-or-absolute-path>
+      /move cursor <relative-or-absolute-path>
+    """
+    if not ctx.args:
+        await update.message.reply_text("Usage: /move <path> OR /move cursor <path>")
+        return
+    args = [a.strip() for a in ctx.args if a.strip()]
+    if not args:
+        await update.message.reply_text("Usage: /move <path> OR /move cursor <path>")
+        return
+    # Optional target prefix (currently only 'cursor' supported)
+    if args[0].lower() == "cursor":
+        rel = " ".join(args[1:]).strip()
+    else:
+        rel = " ".join(args).strip()
+    await update.message.chat.send_action(action="typing")
+    result = send_to_desktop("cursor_move", rel)
+    await update.message.reply_text(result)
+
+async def cmd_custom(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Send custom key chords, globally or to a focused target.
+    Usage:
+      /custom <keys>
+      /custom <cursor|claude> <keys>
+    Examples:
+      /custom winkey+up
+      /custom ctrl+shift+esc
+      /custom cursor ctrl+j
+      /custom claude text:"hello" , ctrl+enter
+    """
+    if not ctx.args:
+        await update.message.reply_text("Usage: /custom <keys> OR /custom <cursor|claude> <keys>")
+        return
+    await update.message.chat.send_action(action="typing")
+    # Global mode if first arg isn't a known target
+    if len(ctx.args) == 1 or ctx.args[0].lower() not in ["cursor", "claude"]:
+        keys = " ".join(ctx.args)
+        result = send_to_desktop("custom", keys)
+        await update.message.reply_text(result)
+        return
+    # Targeted mode
+    target = ctx.args[0].lower()
+    keys = " ".join(ctx.args[1:])
+    mapped = "cursor_custom" if target == "cursor" else "claude_custom"
+    result = send_to_desktop(mapped, keys)
+    await update.message.reply_text(result)
 
 async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Check system status"""
@@ -345,7 +470,7 @@ async def cmd_snap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-ALLOWED_FILE_EXTS = {".md", ".txt", ".patch", ".diff"}
+ALLOWED_FILE_EXTS = {".md", ".txt", ".patch", ".diff", ".png", ".jpg", ".jpeg", ".pdf"}
 MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
 
 def _read_uploaded_as_text(path: Path) -> str:
@@ -382,14 +507,15 @@ async def handle_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     dest = UPLOADS / f"{int(time.time())}_{name}"
     await tg_file.download_to_drive(custom_path=str(dest))
     ctx.chat_data["last_upload"] = str(dest)
+    token = _put_upload_token(dest)
 
     # Inline keyboard to choose target without needing a caption
     buttons = [
-        [InlineKeyboardButton("ChatGPT", callback_data=f"sendfile:chatgpt:{dest.name}")],
-        [InlineKeyboardButton("Claude (Opus flow)", callback_data=f"sendfile:claude:{dest.name}")],
-        [InlineKeyboardButton("Claude (direct)", callback_data=f"sendfile:claude_direct:{dest.name}")],
-        [InlineKeyboardButton("Cursor (new agent)", callback_data=f"sendfile:cursor:{dest.name}")],
-        [InlineKeyboardButton("Cursor (direct)", callback_data=f"sendfile:cursor_direct:{dest.name}")]
+        [InlineKeyboardButton("ChatGPT", callback_data=f"sendfile:chatgpt:{token}")],
+        [InlineKeyboardButton("Claude (Opus flow)", callback_data=f"sendfile:claude:{token}")],
+        [InlineKeyboardButton("Claude (direct)", callback_data=f"sendfile:claude_direct:{token}")],
+        [InlineKeyboardButton("Cursor (new agent)", callback_data=f"sendfile:cursor:{token}")],
+        [InlineKeyboardButton("Cursor (direct)", callback_data=f"sendfile:cursor_direct:{token}")]
     ]
     await update.message.reply_text(
         f"📎 Uploaded `{name}` ({size} bytes). Choose where to send:",
@@ -418,11 +544,9 @@ async def cmd_sendfile(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        content = _read_uploaded_as_text(Path(path))
-        if not content.strip():
-            await update.message.reply_text("File has no extractable text.")
-            return
-        result = send_to_desktop(target, content)
+        # Instead of sending file content, send a reference to the file path/name
+        message = _build_file_reference_message(Path(path))
+        result = send_to_desktop(target, message)
         await update.message.reply_text(result)
     except Exception as e:
         await update.message.reply_text(f"❌ Failed to send file: {e}")
@@ -435,19 +559,16 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not query.data.startswith("sendfile:"):
         return
     try:
-        _, target, fname = query.data.split(":", 2)
+        _, target, token = query.data.split(":", 2)
     except ValueError:
         return
-    path = UPLOADS / fname
+    path = _get_upload_path(token)
     if not path.exists():
         await query.edit_message_text("File no longer available.")
         return
     try:
-        content = _read_uploaded_as_text(path)
-        if not content.strip():
-            await query.edit_message_text("File has no extractable text.")
-            return
-        result = send_to_desktop(target, content)
+        message = _build_file_reference_message(path)
+        result = send_to_desktop(target, message)
         await query.edit_message_text(f"{result}")
     except Exception as e:
         await query.edit_message_text(f"❌ Failed to send file: {e}")
@@ -503,6 +624,9 @@ def main():
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("to", cmd_to))  # New command
     app.add_handler(CommandHandler("query", cmd_query))
+    app.add_handler(CommandHandler("move", cmd_move))
+    app.add_handler(CommandHandler("custom", cmd_custom))
+    app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CommandHandler("snap", cmd_snap))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))

@@ -1,0 +1,24 @@
+{"timestamp": "2025-08-28T00:01:14.560296", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Runner started"}}
+{"timestamp": "2025-08-28T00:05:15.210527", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Runner started"}}
+{"timestamp": "2025-08-28T00:11:03.656974", "type": "notification_sent", "data": {"message": "\ud83d\uded1 Claude Runner stopped"}}
+{"timestamp": "2025-08-28T00:19:58.034635", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Runner started"}}
+{"timestamp": "2025-08-28T00:21:05.498163", "type": "notification_sent", "data": {"message": "\ud83d\uded1 Claude Runner stopped"}}
+{"timestamp": "2025-08-28T00:21:33.772715", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Runner started"}}
+{"timestamp": "2025-08-28T00:21:50.086724", "type": "notification_sent", "data": {"message": "\u274c Task task-1aa8fd27 failed:\nClaude returned empty patch"}}
+{"timestamp": "2025-08-28T00:22:01.461357", "type": "notification_sent", "data": {"message": "\u274c Task task-b353d1ef failed:\nClaude returned empty patch"}}
+{"timestamp": "2025-08-28T00:45:56.552997", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T00:50:55.445459", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T01:02:40.522173", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T01:14:22.483811", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T01:41:02.501028", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T01:50:28.509574", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T01:54:06.609716", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T02:18:30.820548", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T03:18:48.875653", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T03:24:12.891146", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T03:39:48.965420", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T03:45:15.795764", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T03:57:06.902239", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T04:31:02.881786", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T04:38:28.836753", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}
+{"timestamp": "2025-08-28T05:14:03.870582", "type": "notification_sent", "data": {"message": "\ud83d\ude80 Claude Desktop Runner started (no API)"}}

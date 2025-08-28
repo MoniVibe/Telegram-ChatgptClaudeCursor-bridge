@@ -1,0 +1,10 @@
+{
+  "id": "task-b353d1ef",
+  "created_ts": 1756329718,
+  "created_at": "2025-08-28T00:21:58.537717",
+  "kind": "task",
+  "text": "claude hello",
+  "attachments": [],
+  "status": "queued",
+  "user_id": 1790855428
+}

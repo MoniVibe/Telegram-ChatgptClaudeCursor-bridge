@@ -6,12 +6,14 @@ CoordMode "Mouse", "Screen"
 ; Preferred Claude model to select (unused in new flow, kept for future)
 desiredClaudeModel := "Opus"
 ; Send text to ChatGPT, Claude, or Cursor via clipboard
-; Usage: AutoHotkey64.exe send_to.ahk <target> <msgfile>
-; Or:    AutoHotkey64.exe send_to.ahk <target> FILE <filepath>
+; Usage:
+;  - AutoHotkey64.exe send_to.ahk <target> <msgfile>
+;  - AutoHotkey64.exe send_to.ahk <target> FILE <filepath>
+;  - AutoHotkey64.exe send_to.ahk <target> STOP
 ; targets: chatgpt | claude | claude_direct | cursor | cursor_direct
 
 if A_Args.Length < 2 {
-    MsgBox "Usage: send_to.ahk <target> <msgfile|FILE <path>>"
+    MsgBox "Usage: send_to.ahk <target> <msgfile|FILE <path>|STOP>"
     ExitApp 1
 }
 
@@ -19,7 +21,9 @@ target  := A_Args[1]
 mode    := "SEND"
 msgfile := ""
 imgpath := ""
-if (A_Args.Length >= 3 && A_Args[2] = "FILE") {
+if (A_Args.Length >= 2 && A_Args[2] = "STOP") {
+    mode := "STOP"
+} else if (A_Args.Length >= 3 && A_Args[2] = "FILE") {
     mode := "FILE"
     imgpath := A_Args[3]
 } else {
@@ -39,6 +43,46 @@ if (mode = "SEND") {
     Sleep 80
 }
 
+; Handle STOP globally to avoid any accidental paste/flows
+if (mode = "STOP") {
+    if (target = "cursor" or target = "cursor_direct") {
+        ; Focus Cursor and send stop hotkey
+        tryPath1 := EnvGet("LOCALAPPDATA") . "\Programs\cursor\Cursor.exe"
+        tryPath2 := EnvGet("ProgramFiles") . "\Cursor\Cursor.exe"
+        tryPath3 := EnvGet("ProgramFiles(x86)") . "\Cursor\Cursor.exe"
+        cursorExe := ""
+        if FileExist(tryPath1)
+            cursorExe := tryPath1
+        else if FileExist(tryPath2)
+            cursorExe := tryPath2
+        else if FileExist(tryPath3)
+            cursorExe := tryPath3
+        else
+            cursorExe := "Cursor.exe"
+        FocusOrLaunch("Cursor", cursorExe, "")
+        Sleep 120
+        ; Ensure chat input is focused before sending stop
+        Send "^!;"
+        Sleep 140
+        Send "^+{Backspace}"
+    } else if (target = "claude" or target = "claude_direct") {
+        claude1 := EnvGet("LOCALAPPDATA") . "\\Programs\\Claude\\Claude.exe"
+        claude2 := EnvGet("ProgramFiles") . "\\Claude\\Claude.exe"
+        claudeExe := ""
+        if FileExist(claude1)
+            claudeExe := claude1
+        else if FileExist(claude2)
+            claudeExe := claude2
+        if (claudeExe != "")
+            FocusOrLaunch("ahk_exe Claude.exe", claudeExe, "")
+        else
+            FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
+        EnsureActive("ahk_exe Claude.exe")
+        Send "{Esc}"
+    }
+    ExitApp
+}
+
 ; Send to appropriate target
 switch target {
 case "chatgpt":
@@ -47,10 +91,14 @@ case "chatgpt":
     urlCmd := '"' . chromePath . '" https://chat.openai.com/'
     FocusOrLaunch("ChatGPT", "", urlCmd)
     EnsureActive("ChatGPT")
-    ; Press Ctrl+Shift+O before input as requested
-    Send "^+o"
-    Sleep 220
-    PasteAndSend("ChatGPT", false)  ; skip clicks; rely on keyboard focus
+    if (mode = "STOP") {
+        ; No-op for now
+    } else {
+        ; Press Ctrl+Shift+O before input as requested
+        Send "^+o"
+        Sleep 220
+        PasteAndSend("ChatGPT", false)
+    }
     ExitApp
     
 case "claude":
@@ -64,28 +112,34 @@ case "claude":
         claudeExe := claude2
 
     if (claudeExe != "")
-        FocusOrLaunch("Claude", claudeExe, "")
+        FocusOrLaunch("ahk_exe Claude.exe", claudeExe, "")
     else
         FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
-    EnsureActive("Claude")
-    ; 1) Bring up Claude quick input anywhere
-    Send "^!{Space}"
-    Sleep 220
-    ; 2) Dummy input to normalize focus
-    Send "hello"
-    Sleep 120
-    Send "{Enter}"
-    Sleep 3500
-    ; 3) Directly paste user's prompt (already on clipboard)
-    Send "^v"
-    Sleep 200
-    ; 4) Move to send-with-Opus and trigger send
-    Send "{Tab 4}"
-    Sleep 160
-    Send "{Space}"
-    Sleep 140
-    Send "{Space}"
-    Sleep 200
+    EnsureActive("ahk_exe Claude.exe")
+    if (mode = "STOP") {
+        ; ESC to stop/close suggestions
+        Send "{Esc}"
+        Sleep 150
+    } else {
+        ; 1) Bring up Claude quick input anywhere
+        Send "^!{Space}"
+        Sleep 220
+        ; 2) Dummy input to normalize focus
+        Send "hello"
+        Sleep 120
+        Send "{Enter}"
+        Sleep 3500
+        ; 3) Directly paste user's prompt (already on clipboard)
+        Send "^v"
+        Sleep 200
+        ; 4) Move to send-with-Opus and trigger send
+        Send "{Tab 4}"
+        Sleep 160
+        Send "{Space}"
+        Sleep 140
+        Send "{Space}"
+        Sleep 200
+    }
     ExitApp
 
 case "claude_direct":
@@ -101,11 +155,19 @@ case "claude_direct":
         claudeExe := claude2
 
     if (claudeExe != "")
-        FocusOrLaunch("Claude", claudeExe, "")
+        FocusOrLaunch("ahk_exe Claude.exe", claudeExe, "")
     else
         FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
-    EnsureActive("Claude")
-    PasteAndSend("Claude", false)
+    EnsureActive("ahk_exe Claude.exe")
+    ; Nudge focus into the input by sending a Space before paste
+    Send "{Space}"
+    Sleep 120
+    ; Clear any residual text
+    Send "^a"
+    Sleep 100
+    Send "{Del}"
+    Sleep 120
+    PasteAndSend("ahk_exe Claude.exe", false)
     ExitApp
     
 case "cursor":
@@ -124,14 +186,21 @@ case "cursor":
         cursorExe := "Cursor.exe"  ; fallback to PATH lookup
 
     FocusOrLaunch("Cursor", cursorExe, "")
-    ; Open a new agent chat (Ctrl+Shift+I)
-    Send "^+i"
-    ; Give Cursor time to create the chat pane
-    Sleep 700
-    ; Ensure the chat input is focused, then paste and send
-    Send "^!;"
-    Sleep 160
-    Send "^v{Enter}"
+    if (mode = "STOP") {
+        ; Focus cursor agent then send Ctrl+Shift+Backspace
+        Send "^i"
+        Sleep 160
+        Send "^+{Backspace}"
+    } else {
+        ; Open a new agent chat (Ctrl+Shift+I)
+        Send "^+i"
+        ; Give Cursor time to create the chat pane
+        Sleep 700
+        ; Ensure the chat input is focused, then paste and send
+        Send "^!;"
+        Sleep 160
+        Send "^v{Enter}"
+    }
     ExitApp
 
 case "cursor_direct":
@@ -150,12 +219,131 @@ case "cursor_direct":
         cursorExe := "Cursor.exe"
 
     FocusOrLaunch("Cursor", cursorExe, "")
-    ; Focus chat input with custom keybinding (Ctrl+Alt+;)
-    Send "^!;"
-    Sleep 140
-    Send "^v{Enter}"
+    if (mode = "STOP") {
+        Send "^!;"
+        Sleep 160
+        Send "^+{Backspace}"
+    } else {
+        ; Focus agent chat (Ctrl+Alt+;) to ensure input is active
+        Send "^!;"
+        Sleep 140
+        ; Clear any residual text
+        Send "^a"
+        Sleep 100
+        Send "{Del}"
+        Sleep 120
+        Send "^v{Enter}"
+    }
     ExitApp
     
+case "cursor_move":
+    ; Focus Cursor and open folder dialog, then navigate to requested path
+    tryPath1 := EnvGet("LOCALAPPDATA") . "\Programs\cursor\Cursor.exe"
+    tryPath2 := EnvGet("ProgramFiles") . "\Cursor\Cursor.exe"
+    tryPath3 := EnvGet("ProgramFiles(x86)") . "\Cursor\Cursor.exe"
+    cursorExe := ""
+    if FileExist(tryPath1)
+        cursorExe := tryPath1
+    else if FileExist(tryPath2)
+        cursorExe := tryPath2
+    else if FileExist(tryPath3)
+        cursorExe := tryPath3
+    else
+        cursorExe := "Cursor.exe"
+
+    FocusOrLaunch("Cursor", cursorExe, "")
+    EnsureActive("Cursor")
+
+    ; Open "Open Folder" in Cursor (expects Ctrl+M bound)
+    Send "^m"
+    Sleep 320
+    ; Focus the address/path field and clear it
+    Send "!d"
+    Sleep 160
+    Send "^a"
+    Sleep 120
+
+    ; Build destination path from base + user-provided relative segment (simple join)
+    base := "C:\Users\Moni\Documents\claudeprojects"
+    ; Ensure base has no trailing backslash
+    while (SubStr(base, StrLen(base)) = "\\")
+        base := SubStr(base, 1, StrLen(base) - 1)
+
+    rel := text   ; text is loaded from msg file in SEND mode
+    ; Trim whitespace
+    rel := Trim(rel, "`r`n `t")
+    ; Remove literal prefix "cursor " if present (case-insensitive)
+    if (StrLen(rel) >= 7 && StrLower(SubStr(rel, 1, 6)) = "cursor" && SubStr(rel, 7, 1) = " ")
+        rel := Trim(SubStr(rel, 8), " `t")
+    ; Normalize forward slashes to backslashes
+    rel := StrReplace(rel, "/", "\\")
+    ; Remove ALL leading backslashes from rel
+    while (SubStr(rel, 1, 1) = "\\")
+        rel := SubStr(rel, 2)
+
+    if (rel = "")
+        dest := base
+    else
+        dest := base . "\\" . rel
+
+    ; Paste destination path and confirm in one go
+    A_Clipboard := dest
+    Sleep 120
+    Send "^v"
+    Sleep 160
+    Send "{Enter}"
+    Sleep 140
+    Send "{Enter}"
+    ExitApp
+    
+case "cursor_custom":
+    ; Focus Cursor and send arbitrary key chords from input text
+    tryPath1 := EnvGet("LOCALAPPDATA") . "\Programs\cursor\Cursor.exe"
+    tryPath2 := EnvGet("ProgramFiles") . "\Cursor\Cursor.exe"
+    tryPath3 := EnvGet("ProgramFiles(x86)") . "\Cursor\Cursor.exe"
+    cursorExe := ""
+    if FileExist(tryPath1)
+        cursorExe := tryPath1
+    else if FileExist(tryPath2)
+        cursorExe := tryPath2
+    else if FileExist(tryPath3)
+        cursorExe := tryPath3
+    else
+        cursorExe := "Cursor.exe"
+
+    FocusOrLaunch("Cursor", cursorExe, "")
+    EnsureActive("Cursor")
+    keysText := Trim(text, "`r`n `t")
+    if (keysText != "")
+        DoSendKeys(keysText)
+    ExitApp
+
+case "claude_custom":
+    ; Focus Claude and send arbitrary key chords from input text
+    claude1 := EnvGet("LOCALAPPDATA") . "\\Programs\\Claude\\Claude.exe"
+    claude2 := EnvGet("ProgramFiles") . "\\Claude\\Claude.exe"
+    claudeExe := ""
+    if FileExist(claude1)
+        claudeExe := claude1
+    else if FileExist(claude2)
+        claudeExe := claude2
+    if (claudeExe != "")
+        FocusOrLaunch("ahk_exe Claude.exe", claudeExe, "")
+    else
+        FocusOrLaunch("Claude", "", "msedge.exe https://claude.ai/new")
+    EnsureActive("ahk_exe Claude.exe")
+    keysText := Trim(text, "`r`n `t")
+    if (keysText != "")
+        DoSendKeys(keysText)
+    ExitApp
+
+case "custom":
+    ; Send keys globally without focusing or launching any application
+    keysText := Trim(text, "`r`n `t")
+    if (keysText != "")
+        DoSendKeys(keysText)
+    ExitApp
+
 default:
     MsgBox "Unknown target: " . target
     ExitApp 1
@@ -237,6 +425,72 @@ PasteAndSend(title, doClick := true) {
     ; Release always-on-top and input block
     WinSetAlwaysOnTop 0, title
     BlockInput "Off"
+}
+
+; Parse and send user-friendly key chord strings, e.g.:
+;   ctrl+j
+;   ctrl+shift+p
+;   alt+f, o
+;   text:"hello world" then ctrl+enter
+DoSendKeys(keysText) {
+    ; Split sequences by commas for sequential actions
+    parts := StrSplit(keysText, ",")
+    for idx, part in parts {
+        seq := Trim(part)
+        if (seq = "") {
+            continue
+        }
+
+        ; Support literal text: prefix text:"..."
+        if (SubStr(StrLower(seq), 1, 5) = "text:") {
+            msg := Trim(SubStr(seq, 6), " `t`r`n")
+            if (msg != "") {
+                Send msg
+            }
+            continue
+        }
+
+        ; Map common modifiers to AHK syntax
+        lower := StrLower(seq)
+        lower := StrReplace(lower, "ctrl+", "^")
+        lower := StrReplace(lower, "control+", "^")
+        lower := StrReplace(lower, "shift+", "+")
+        lower := StrReplace(lower, "alt+", "!")
+        ; Accept synonyms for Windows key
+        lower := StrReplace(lower, "win+", "#")
+        lower := StrReplace(lower, "windows+", "#")
+        lower := StrReplace(lower, "winkey+", "#")
+
+        ; Normalize special names
+        ; Examples: enter, tab, esc, space, up, down, left, right, home, end
+        ; Handle common case: modifiers + word key (e.g., #down, ^enter)
+        if RegExMatch(lower, "i)^([\^\+!#]+)([a-z]+)$", &m) {
+            mods := m[1]
+            key  := m[2]
+            Send mods "{" key "}"
+        } else if RegExMatch(lower, "i)^(\^|\+|!|#)*[a-z0-9]$") {
+            ; single char with modifiers (e.g., ^j)
+            Send lower
+        } else {
+            ; Convert words to {word} style if not already with {}
+            if (InStr(lower, "{") = 0) {
+                tokens := StrSplit(lower, "+", "`t `r`n")
+                out := ""
+                for i, t in tokens {
+                    if (t = "^" or t = "+" or t = "!" or t = "#") {
+                        out .= t
+                    } else if (StrLen(t) = 1) {
+                        out .= t
+                    } else {
+                        out .= "{" . t . "}"
+                    }
+                }
+                lower := out
+            }
+            Send lower
+        }
+        Sleep 120
+    }
 }
 
 SelectClaudeModel(title, modelName) {

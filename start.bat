@@ -1,13 +1,16 @@
 @echo off
 REM Start the orchestrator system on Windows
 
+REM Ensure we run from this script's folder
+cd /d %~dp0
+
 echo Starting Orchestrator System...
 echo.
 
-REM Check Python
-python --version >nul 2>&1
+REM Check Python 3.11 via py launcher
+py -3.11 -V >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python not found. Please install Python 3.10+
+    echo ERROR: Python 3.11 not found by py launcher. Install Python 3.11.
     pause
     exit /b 1
 )
@@ -15,18 +18,18 @@ if errorlevel 1 (
 REM Check if .env exists
 if not exist ".env" (
     echo First time setup detected...
-    python setup.py
+    py -3.11 setup.py
     echo.
 )
 
 REM Start services in separate windows
 echo Starting Bridge Bot...
-start "Bridge Bot" cmd /k python bridge_bot.py
+start "Orchestrator Bridge Bot" cmd /k py -3.11 bridge_bot.py
 
 timeout /t 2 >nul
 
-echo Starting Claude Runner...
-start "Claude Runner" cmd /k python claude_runner.py
+echo Starting Claude Desktop Runner...
+start "Orchestrator Claude Runner" cmd /k py -3.11 claude_desktop_runner.py
 
 echo.
 echo ✅ Orchestrator is running!
@@ -39,9 +42,9 @@ echo.
 echo Press any key to stop all services...
 pause >nul
 
-REM Kill Python processes
-taskkill /F /FI "WINDOWTITLE eq Bridge Bot*" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq Claude Runner*" >nul 2>&1
+REM Kill service windows by title
+taskkill /F /FI "WINDOWTITLE eq Orchestrator Bridge Bot*" >nul 2>&1
+taskkill /F /FI "WINDOWTITLE eq Orchestrator Claude Runner*" >nul 2>&1
 
 echo Services stopped.
 pause
