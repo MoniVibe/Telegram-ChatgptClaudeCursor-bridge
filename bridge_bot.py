@@ -83,8 +83,8 @@ def _get_upload_path(token: str) -> Path | None:
 
 def _build_file_reference_message(path: Path) -> str:
     """Create the requested directive line that points to tasks/uploads."""
-    rel_hint = f"../claudeprojects/orchestrator/tasks/uploads/{path.name}"
-    return f"proceed according to \"{rel_hint}\""
+    rel_hint = f"tasks/uploads/{path.name}"
+    return f"check {rel_hint} and proceed"
 
 # AutoHotkey configuration
 AHK_EXE = r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"  # Adjust if needed
