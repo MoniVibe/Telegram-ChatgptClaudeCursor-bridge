@@ -257,6 +257,9 @@ case "cursor_move":
     FocusOrLaunch("Cursor", cursorExe, "")
     EnsureActive("Cursor")
 
+    ; Defocus terminal/input by focusing chat input (Ctrl+Alt+;) so Ctrl+M/Ctrl+O go to editor
+    Send "^!;"
+    Sleep 160
     ; Open "Open Folder" in Cursor (expects Ctrl+M bound), then "Open" dialog with Ctrl+O
     Send "^m"
     Sleep 240
