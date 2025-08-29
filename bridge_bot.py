@@ -507,6 +507,43 @@ async def cmd_snap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
+async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Upload the latest report .md using the new convention.
+    Usage:
+      /report cursor <projectname>  -> ../claudeprojects/{projectname}/directives/reports/cursorreports/
+      /report claude <projectname>  -> ../claudeprojects/{projectname}/directives/reports/claudereports/
+    """
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text("Usage: /report <cursor|claude> <projectname>")
+        return
+    target = ctx.args[0].strip().lower()
+    project = " ".join(ctx.args[1:]).strip()
+    if target not in ["cursor", "claude"]:
+        await update.message.reply_text("First argument must be 'cursor' or 'claude'.")
+        return
+    try:
+        subfolder = "cursorreports" if target == "cursor" else "claudereports"
+        base_dir = (BASE.parent / project / "directives" / "reports").resolve()
+        reports_dir = (base_dir / subfolder)
+        if not reports_dir.exists():
+            await update.message.reply_text(
+                f"❌ Reports directory not found for `{target}` `{project}`\nPath: `{reports_dir}`",
+                parse_mode='Markdown'
+            )
+            return
+        files = sorted(reports_dir.glob("*.md"), key=lambda p: p.stat().st_mtime)
+        if not files:
+            await update.message.reply_text("📭 No .md reports found in that reports directory")
+            return
+        latest = files[-1]
+        await update.message.reply_document(
+            document=open(latest, 'rb'),
+            caption=f"📄 Latest {target} report from `{project}`: `{latest.name}`",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send report: {e}")
+
 ALLOWED_FILE_EXTS = {".md", ".txt", ".patch", ".diff", ".png", ".jpg", ".jpeg", ".pdf"}
 MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
 
@@ -667,6 +704,7 @@ def main():
     app.add_handler(CommandHandler("focus", cmd_focus))
     app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(CommandHandler("snap", cmd_snap))
+    app.add_handler(CommandHandler("report", cmd_report))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("list", cmd_list))
     app.add_handler(CommandHandler("clear", cmd_clear))
